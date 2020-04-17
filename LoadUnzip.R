@@ -2,7 +2,7 @@ if(!file.exists("data")){
         dir.create("data")
 }
 
-download.file(fileUrl,destfile="./data/pamd.zip",method="curl")
+download.file(fileUrl,destfile="./data/maindf.bz2",method="curl")
 
 dateDownloaded <- date()
 
