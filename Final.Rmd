@@ -1,0 +1,297 @@
+---
+title: "National Climatic Data Center Storm Events Analysis"
+output: 
+  html_document:
+    keep_md: true
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+## Data 
+
+The data for this assignment come in the form of a comma-separated-value file compressed via the bzip2 algorithm to reduce its size. You can download the file from the course web site:
+
+* [Storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2)
+
+There is also some documentation of the database available. Here you will find how some of the variables are constructed/defined.
+
+* National Weather Service [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf)
+* National Climatic Data Center Storm Events [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf)
+
+## Environment Setup
+
+```{r Library and Setup, message=FALSE}
+library(tidyverse)
+library(plotly)
+library(cowplot)
+library(lubridate)
+downloadDate <- date()
+sessionInfo()
+```
+
+## Data Processing
+
+Download date is `r downloadDate`.
+```{r Load Data, message = FALSE, cache = TRUE}
+fileUrl <-
+        "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+fname <- c("./data/maindf.csv.bz2")
+
+if (!file.exists("data")) {
+        dir.create("data")
+}
+
+download.file(fileUrl, destfile = "./data/maindf.csv.bz2", method = "curl")
+
+maindf <-
+        read.csv(
+                fname,
+                header = TRUE,
+                na.strings = c("", "NA"),
+                stringsAsFactors = FALSE
+        )
+```
+
+## Purpose
+
+The basic goal of this assignment is to explore the NOAA Storm Database and answer some basic questions about severe weather events. You must use the database to answer the questions below and show the code for your entire analysis. Your analysis can consist of tables, figures, or other summaries. You may use any R package you want to support your analysis.
+
+Data analysis must address the following questions:
+
+1. Across the United States, which types of **events** (as indicated in the EVTYPE variable) are most **harmful** with respect to population health?
+
+2. Across the United States, which types of **events** have the greatest **economic consequences**?
+
+## Strategy in Dimension Reduction
+
+1. Focus on the **Purpose**
+2. Analyze missing data
+    + Event Type
+    + Harmful to health 
+    + Economic consequences 
+3. Imputing missing data
+4. Analyze the data
+
+note: using ggplot2 combined with plotly, some charts **interactive charts (zoom in please)**.  
+
+### Focus on the Purpose
+
+Select only the data needed to answer the question.  
+```{r Select need in maindf, cache=TRUE}
+noaadf<- maindf %>% select(EVTYPE, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP, FATALITIES, INJURIES)
+```
+
+### Analyze missing data
+
+```{r Missing Data Analysis}
+naAnalysis <- noaadf %>%
+    purrr::map_df(function(x) round(mean(is.na(x)),digits = 2)*100) %>%
+    gather(EVType, naAverage)
+
+naAnalysis %>% ggplot(aes(x = EVType, y = naAverage)) %>% +
+  geom_point(aes(reorder(EVType, naAverage))) + theme(axis.text.x =
+              element_text(angle = 90, hjust = .1)) + labs(x = "Event Type", 
+              y = "NA Average  (%)", title = "Missing Data Analysis")
+```
+
+### Magnitude of Measure (K,M,B)
+
+Property damages are divided into 2 variables which are:
+
+1. PROPDMG - 0 missing data
+2. PROPDMGEXP (Magnitude of measure) - 52 % missing data 
+
+Crop damages are divided into 2 variables which are:
+
+1. CROPDMG - 0 missing data
+2. CROPDMGEXP (Magnitude of measure) - 69 % missing data
+
+Next step is to dig deeper and see what is behind our 52% missing data in PROPDMGEXP and 69% missing data in CROPDMGEXP. 
+
+According to [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) (page 12) the magnitude of the PROPDMG and CROPDMG are as follows: K= 10^3, M= 10^6, B=10^9
+
+Deep dive the values of NA (missing data) in PROPDMGEXP and CROPDMGEXP. 
+
+```{r Magnitude analysis}
+
+RgPropEXP <- table(unlist(noaadf$PROPDMGEXP)) 
+
+RgPropEXPdf <-
+        tibble(Magnitude = names(RgPropEXP), FREQ = as.integer(RgPropEXP))
+
+RgCropEXP <- table(unlist(noaadf$CROPDMGEXP))
+RgCropEXPdf <-
+        tibble(Magnitude = names(RgCropEXP), FREQ = as.integer(RgCropEXP))
+
+RgCropEXPdf$Event <- "Crop"
+RgPropEXPdf$Event <- "Prop"
+
+PC <- rbind(RgPropEXPdf, RgCropEXPdf)
+
+g1<- 
+        PC %>% ggplot(aes(
+                x = reorder(Magnitude, -FREQ), y = FREQ, fill = Event
+        )) + geom_col() + labs(x = "Magnitude of Measure (K, M, B)", y = "Frequency", title = "Frequency of Magnitude of Measure",subtitle = "(without log10)")+ theme(legend.position = "none"
+)
+gg1<- 
+        PC %>% ggplot(aes(
+                x = reorder(Magnitude, -FREQ), y = FREQ, fill = Event
+        )) + geom_col() + labs(x = "Magnitude of Measure (K, M, B)", y = "Frequency (log10)", title = "Frequency of Magnitude of Measure",subtitle = "(log10)")+scale_y_log10()
+plot_grid(g1, gg1) 
+```
+```{r}
+PC %>% arrange(desc(FREQ))
+```
+
+```{r g2 NA Property Damage}
+na_prop <- noaadf %>% filter(is.na(PROPDMGEXP), PROPDMG > 0)
+na_crop <- noaadf %>% filter(is.na(CROPDMGEXP), CROPDMG > 0)
+g2 <-
+        na_prop %>% ggplot(aes(x = reorder(EVTYPE, -PROPDMG), y = PROPDMG)) + geom_col() +
+        theme(axis.text.x = element_text(angle = 90, hjust = .5)) + labs(y =
+                                                                                 "Damages", title = "Property and Crop Damages (Missing Magnitude of Measure")
+gg2 <-
+        na_crop %>% ggplot(aes(x = reorder(EVTYPE, -CROPDMG), y = CROPDMG)) + geom_col() +
+        theme(axis.text.x = element_text(angle = 90, hjust = .5))
+
+subplot(g2, gg2, shareY = T) 
+```
+
+```{r sum and length}
+plen<-length(na_prop$PROPDMG)
+psum<-sum(na_prop$PROPDMG)
+
+clen<-length(na_crop$CROPDMG)
+csum<-sum(na_crop$CROPDMG)
+```
+
+### Findings and Recommendations
+
+According to [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) (page 12) the magnitude of the PROPDMG and CROPDMG are as follows: K= 10^3, M= 10^6, B=10^9
+
+Property Damage with missing magnitude **Findings**:
+
+1. PROPDMGEXP has `r plen` unique observations, K has the most frequency
+2. PROPDMGEXP  has 52% missing data
+3. Out of the 52% missing data there are `r plen` observations valuing total property damage of `r psum`
+ 
+
+PROPDMGEXP **Recommendation**:
+
+1. Use the magnitude recommended by the Storm Data Documentation (K, M, B) plus O =10^0
+2. Data base manager needs to address this issue and convert CROPDMGEXP to O=10^0, K= 10^3, M= 10^6, and B=10^9.
+3. Person that completes the data entry should only have a choice of O, K, M, B, as a unit of measure
+
+Crop Damage with missing magnitude **Findings**:
+
+1. CROPDMGEXP has `r clen` unique observations, K has the most frequency
+2. CROPDMGEXP  has 69% missing data
+3. Out of the 69% missing data there are `r clen` observations valuing total property damage of `r csum`
+
+
+CROPDMGEXP **Recommendation**:
+
+1. Use the magnitude recommended by the Storm Data Documentation (K, M, B) plus O =10^0
+2. Data base manager needs to address this issue and convert CROPDMGEXP to O=10^0, K= 10^3, M= 10^6, and B=10^9.
+3. Person that completes the data entry should only have a choice of O, K, M, B, as a unit of measure
+
+The value of damages `r psum` and `r csum` has no magnitude and needs to be excluded from our analysis. We cannot tell if it is valued at 1000, a million or a billion.  
+
+### Continue Reducing the Dimension
+
+With the knowledge we gained from analyzing the missing data, we will convert magnitude as follows:
+
+1. H/h = 10^2
+2. K/k = 10^3
+2. M/m = 10^6
+3. B/b = 10^9
+4. anything other than these will be at 0 (filter them out)
+```{r Prop and Crop range}
+PC %>% arrange(desc(FREQ))
+unique(noaadf$PROPDMGEXP)
+unique(noaadf$CROPDMGEXP)
+```
+
+```{r Cleaning magnitude}
+
+# recode the data K=10^3...
+noaadf$PROPDMGEXP <-recode(noaadf$PROPDMGEXP, "K" = 10^3, "M"=10^6, "B" =10^9, "m"=10^6, "+"=0, "5"=0, "6"=0, "?"=0, "4"=0, "2"=0,"3"=0, "h"=10^2, "7"=0, "H"=10^2, "-"=0, "8"=0,.default=1) 
+noaadf$PROPDMGEXP[is.na(noaadf$PROPDMGEXP)] <- 0
+sum(is.na(noaadf$PROPDMGEXP))
+
+noaadf$CROPDMGEXP <-recode(noaadf$CROPDMGEXP, "M" = 10^6, "K"=10^3, "m"=10^6, "B" =10^9, "?"=0, "k"=10^3, "2"=0,.default = 1 )
+noaadf$CROPDMGEXP[is.na(noaadf$CROPDMGEXP)] <- 0
+sum(is.na(noaadf$CROPDMGEXP))
+
+# multiply Damage with Magnitude
+noaadf <- noaadf %>% mutate(Property_Damage = PROPDMG*PROPDMGEXP, Crop_Damages=CROPDMG*CROPDMGEXP)
+
+# select only needed
+noaadf<- noaadf %>% select(EVTYPE, FATALITIES,INJURIES,Property_Damage, Crop_Damages)
+
+noaadf <- noaadf %>% mutate(Damages = Property_Damage+Crop_Damages)
+noaadf <- noaadf %>% select(EVTYPE, FATALITIES, INJURIES, Damages)
+```
+
+
+```{r Totals, results='hide'}
+TotalDmg<- sum(noaadf$Damages)/10^6
+TotalDth<-sum(noaadf$FATALITIES)
+TotalInj<-sum(noaadf$INJURIES)
+
+noaadf$EVTYPE <- factor(noaadf$EVTYPE)
+by_event <- group_by(noaadf, EVTYPE)
+```
+
+## Results - finally
+
+Too many days and nights were spent analyzing and over thinking this assignment. FOCUS!
+
+```{r Finally}
+sumFinalDf <- summarise(by_event,
+                     count=n(),
+                     Fatalities = sum(FATALITIES),
+                     rankFtly = min_rank(desc(Fatalities)),
+                     Injuries = sum(INJURIES),
+                     rankInj = min_rank(Injuries),
+                     Dmg = sum(Damages),
+                     rankDmg = min_rank(desc(Dmg)))
+takealook<-sumFinalDf %>% filter(Fatalities >0 & Dmg >0)
+
+g3<-takealook %>% ggplot(aes(x=Dmg/10^6, y=Fatalities+Injuries, color=EVTYPE, alpha = .3))+geom_point(aes(size=count))+labs(x="Damages (in millions)", y="Total Harm", title = "Relationship of Total Harm and Economic Damages" )
+
+ggplotly(g3) %>% hide_legend()
+```
+
+
+1. Across the United States, which types of **events** (as indicated in the EVTYPE variable) are most **harmful** with respect to population health?
+
+- From 1950 to 2011, tornado has the most harmful of all events. **Zoom in above the chart** to remove the outliers of the data. 
+
+2. Across the United States, which types of **events** have the greatest **economic consequences**?
+
+- From 1950-2011, flood has the greatest economic consequences across the United States. 
+
+
+
+
+
+
+
+
+
+
+
+
+
